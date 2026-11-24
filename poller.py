@@ -72,6 +72,19 @@ POSITION_SOURCES = {0: "ADS-B", 1: "ASTERIX", 2: "MLAT", 3: "FLARM"}
 # --------------------------------------------------------------------------
 # Config
 # --------------------------------------------------------------------------
+def load_dotenv(path: str | Path = ".env") -> None:
+    """Tiny .env loader (no dependency). Real environment variables win."""
+    p = Path(path)
+    if not p.is_file():
+        return
+    for line in p.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
 @dataclass
 class Config:
     client_id: str | None = None
@@ -84,6 +97,7 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
+        load_dotenv()
         cid = os.getenv("OPENSKY_CLIENT_ID")
         secret = os.getenv("OPENSKY_CLIENT_SECRET")
         cred_file = os.getenv("OPENSKY_CREDENTIALS_FILE")
@@ -318,6 +332,8 @@ async def run_poller(cfg: Config, stats: Stats, stop: asyncio.Event) -> None:
             "No OpenSky credentials set: anonymous access has a much smaller daily "
             "credit allowance and will not sustain a 30 s poll all day."
         )
+    if not tm.anonymous:
+        log.info("auth mode: authenticated (OAuth2)")
     failures = 0
     next_tick = time.monotonic()
     async with httpx.AsyncClient(timeout=20.0) as client:
@@ -389,6 +405,8 @@ def status() -> dict:
 async def _once() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     tm = TokenManager(cfg.client_id, cfg.client_secret, cfg.token_url)
+    log.warning("auth mode: %s", "ANONYMOUS (no credentials found)" if tm.anonymous
+                else "authenticated (OAuth2)")
     async with httpx.AsyncClient(timeout=20.0) as client:
         await poll_cycle(client, tm, cfg, stats)
     print(json.dumps(asdict(stats), indent=2))
